@@ -65,7 +65,8 @@ from nnunetv2.utilities.get_network_from_plans import get_network_from_plans
 from nnunetv2.utilities.helpers import empty_cache, dummy_context
 from nnunetv2.utilities.label_handling.label_handling import convert_labelmap_to_one_hot, determine_num_input_channels
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
-
+from nnunetv2.training.loss.rce import RCE_L1Loss
+from nnunetv2.utilities.helpers import softmax_helper_dim1
 
 class nnUNetTrainer(object):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
@@ -389,37 +390,60 @@ class nnUNetTrainer(object):
             self.oversample_foreground_percent = oversample_percent
 
     def _build_loss(self):
-        if self.label_manager.has_regions:
-            loss = DC_and_BCE_loss({},
-                                   {'batch_dice': self.configuration_manager.batch_dice,
-                                    'do_bg': True, 'smooth': 1e-5, 'ddp': self.is_ddp},
-                                   use_ignore_label=self.label_manager.ignore_label is not None,
-                                   dice_class=MemoryEfficientSoftDiceLoss)
-        else:
-            loss = DC_and_CE_loss({'batch_dice': self.configuration_manager.batch_dice,
-                                   'smooth': 1e-5, 'do_bg': False, 'ddp': self.is_ddp}, {}, weight_ce=1, weight_dice=1,
-                                  ignore_label=self.label_manager.ignore_label, dice_class=MemoryEfficientSoftDiceLoss)
+        # if self.label_manager.has_regions:
+        #     loss = DC_and_BCE_loss({},
+        #                            {'batch_dice': self.configuration_manager.batch_dice,
+        #                             'do_bg': True, 'smooth': 1e-5, 'ddp': self.is_ddp},
+        #                            use_ignore_label=self.label_manager.ignore_label is not None,
+        #                            dice_class=MemoryEfficientSoftDiceLoss)
+        # else:
+        #     loss = DC_and_CE_loss({'batch_dice': self.configuration_manager.batch_dice,
+        #                            'smooth': 1e-5, 'do_bg': False, 'ddp': self.is_ddp}, {}, weight_ce=1, weight_dice=1,
+        #                           ignore_label=self.label_manager.ignore_label, dice_class=MemoryEfficientSoftDiceLoss)
 
+        # if self._do_i_compile():
+        #     loss.dc = torch.compile(loss.dc)
+
+        # # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
+        # # this gives higher resolution outputs more weight in the loss
+
+        # if self.enable_deep_supervision:
+        #     deep_supervision_scales = self._get_deep_supervision_scales()
+        #     weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
+        #     if self.is_ddp and not self._do_i_compile():
+        #         # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
+        #         # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
+        #         # Anywho, the simple fix is to set a very low weight to this.
+        #         weights[-1] = 1e-6
+        #     else:
+        #         weights[-1] = 0
+
+        #     # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
+        #     weights = weights / weights.sum()
+        #     # now wrap the loss
+        #     loss = DeepSupervisionWrapper(loss, weights)
+        # Initialize RCE_L1 loss with lambda = 1.0 (or your tuned value)
+        loss = RCE_L1Loss(
+            apply_nonlin=softmax_helper_dim1,
+            lambda_reg=1.0,
+            ddp=self.is_ddp
+        )
+
+        # Optional: compile for performance (PyTorch 2.0+)
         if self._do_i_compile():
-            loss.dc = torch.compile(loss.dc)
+            loss = torch.compile(loss)
 
-        # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
-        # this gives higher resolution outputs more weight in the loss
-
+        # Apply deep supervision wrapper if enabled
         if self.enable_deep_supervision:
             deep_supervision_scales = self._get_deep_supervision_scales()
             weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
             if self.is_ddp and not self._do_i_compile():
-                # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
-                # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
-                # Anywho, the simple fix is to set a very low weight to this.
-                weights[-1] = 1e-6
+                weights[-1] = 1e-6 # prevent DDP crash
             else:
                 weights[-1] = 0
-
-            # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
             weights = weights / weights.sum()
-            # now wrap the loss
+
+            # Wrap with deep supervision
             loss = DeepSupervisionWrapper(loss, weights)
 
         return loss
