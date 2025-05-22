@@ -67,6 +67,9 @@ from nnunetv2.utilities.label_handling.label_handling import convert_labelmap_to
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 from nnunetv2.training.loss.rce import RCE_L1Loss
 from nnunetv2.utilities.helpers import softmax_helper_dim1
+from nnunetv2.training.loss.rce import RCE_L1Loss
+from nnunetv2.training.loss.focal import FocalLoss
+from nnunetv2.training.loss.lovasz import LovaszSoftmaxLoss
 
 class nnUNetTrainer(object):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
@@ -110,7 +113,8 @@ class nnUNetTrainer(object):
         # need. So let's save the init args
         self.my_init_kwargs = {}
         for k in inspect.signature(self.__init__).parameters.keys():
-            self.my_init_kwargs[k] = locals()[k]
+            if k in locals():
+                self.my_init_kwargs[k] = locals()[k]
 
         ###  Saving all the init args into class variables for later access
         self.plans_manager = PlansManager(plans)
@@ -149,7 +153,7 @@ class nnUNetTrainer(object):
         self.probabilistic_oversampling = False
         self.num_iterations_per_epoch = 250
         self.num_val_iterations_per_epoch = 50
-        self.num_epochs = 10 # changed from 1000
+        self.num_epochs = 1000 # changed from 1000
         self.current_epoch = 0
         self.enable_deep_supervision = True
 
@@ -389,64 +393,55 @@ class nnUNetTrainer(object):
             self.batch_size = batch_size_per_GPU[my_rank]
             self.oversample_foreground_percent = oversample_percent
 
+
     def _build_loss(self):
-        # if self.label_manager.has_regions:
-        #     loss = DC_and_BCE_loss({},
-        #                            {'batch_dice': self.configuration_manager.batch_dice,
-        #                             'do_bg': True, 'smooth': 1e-5, 'ddp': self.is_ddp},
-        #                            use_ignore_label=self.label_manager.ignore_label is not None,
-        #                            dice_class=MemoryEfficientSoftDiceLoss)
-        # else:
-        #     loss = DC_and_CE_loss({'batch_dice': self.configuration_manager.batch_dice,
-        #                            'smooth': 1e-5, 'do_bg': False, 'ddp': self.is_ddp}, {}, weight_ce=1, weight_dice=1,
-        #                           ignore_label=self.label_manager.ignore_label, dice_class=MemoryEfficientSoftDiceLoss)
+        # Choose which loss to use
+        loss_type = getattr(self, "loss_type", "dice")  # default to Dice if not set
+        print(f"Loss Type: {loss_type}")
 
-        # if self._do_i_compile():
-        #     loss.dc = torch.compile(loss.dc)
+        if loss_type == "rce":
+            loss = RCE_L1Loss(
+                apply_nonlin=softmax_helper_dim1,
+                lambda_reg=1.0,
+                ddp=self.is_ddp
+            )
+        elif loss_type == "focal":
+            loss = FocalLoss(
+                gamma=2.0,
+                apply_nonlin=softmax_helper_dim1
+            )
+        elif loss_type == "lovasz":
+            loss = LovaszSoftmaxLoss(
+                apply_nonlin=softmax_helper_dim1
+            )
+        elif loss_type == "dice":
+            loss = MemoryEfficientSoftDiceLoss(
+                apply_nonlin=softmax_helper_dim1,
+                batch_dice=self.configuration_manager.batch_dice,
+                do_bg=True,
+                smooth=1e-5,
+                ddp=self.is_ddp
+            )
+        else:
+            raise ValueError(f"Unknown loss_type: {loss_type}")
 
-        # # we give each output a weight which decreases exponentially (division by 2) as the resolution decreases
-        # # this gives higher resolution outputs more weight in the loss
-
-        # if self.enable_deep_supervision:
-        #     deep_supervision_scales = self._get_deep_supervision_scales()
-        #     weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
-        #     if self.is_ddp and not self._do_i_compile():
-        #         # very strange and stupid interaction. DDP crashes and complains about unused parameters due to
-        #         # weights[-1] = 0. Interestingly this crash doesn't happen with torch.compile enabled. Strange stuff.
-        #         # Anywho, the simple fix is to set a very low weight to this.
-        #         weights[-1] = 1e-6
-        #     else:
-        #         weights[-1] = 0
-
-        #     # we don't use the lowest 2 outputs. Normalize weights so that they sum to 1
-        #     weights = weights / weights.sum()
-        #     # now wrap the loss
-        #     loss = DeepSupervisionWrapper(loss, weights)
-        # Initialize RCE_L1 loss with lambda = 1.0 (or your tuned value)
-        loss = RCE_L1Loss(
-            apply_nonlin=softmax_helper_dim1,
-            lambda_reg=1.0,
-            ddp=self.is_ddp
-        )
-
-        # Optional: compile for performance (PyTorch 2.0+)
+        # Optional: compile the loss (PyTorch 2.0+)
         if self._do_i_compile():
             loss = torch.compile(loss)
 
-        # Apply deep supervision wrapper if enabled
+        # Deep supervision wrapper
         if self.enable_deep_supervision:
             deep_supervision_scales = self._get_deep_supervision_scales()
             weights = np.array([1 / (2 ** i) for i in range(len(deep_supervision_scales))])
             if self.is_ddp and not self._do_i_compile():
-                weights[-1] = 1e-6 # prevent DDP crash
+                weights[-1] = 1e-6
             else:
                 weights[-1] = 0
             weights = weights / weights.sum()
-
-            # Wrap with deep supervision
             loss = DeepSupervisionWrapper(loss, weights)
 
         return loss
+
 
     def configure_rotation_dummyDA_mirroring_and_inital_patch_size(self):
         """
@@ -1405,3 +1400,24 @@ class nnUNetTrainer(object):
             self.on_epoch_end()
 
         self.on_train_end()
+
+# Adding trainer sub classes
+class nnUNetTrainer_Lovasz(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "lovasz"
+
+class nnUNetTrainer_Focal(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "focal"
+
+class nnUNetTrainer_Dice(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "dice"
+
+class nnUNetTrainer_RCE(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "rce"
