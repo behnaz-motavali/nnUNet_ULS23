@@ -53,6 +53,7 @@ from nnunetv2.training.data_augmentation.compute_initial_patch_size import get_p
 from nnunetv2.training.dataloading.nnunet_dataset import infer_dataset_class
 from nnunetv2.training.dataloading.data_loader import nnUNetDataLoader
 from nnunetv2.training.logging.nnunet_logger import nnUNetLogger
+from nnunetv2.training.loss.CrossEntropy import CrossEntropyLossWrapper
 from nnunetv2.training.loss.compound_losses import DC_and_CE_loss, DC_and_BCE_loss
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.loss.dice import get_tp_fp_fn_tn, MemoryEfficientSoftDiceLoss
@@ -408,6 +409,10 @@ class nnUNetTrainer(object):
                 lambda_reg=1.0,
                 ddp=self.is_ddp
             )
+        if loss_type == "ce":
+            loss = CrossEntropyLossWrapper(
+                ignore_label=self.label_manager.ignore_label
+            )  
         elif loss_type == "focal":
             loss = FocalLoss(
                 gamma=2.0,
@@ -1430,6 +1435,11 @@ class nnUNetTrainer_RCE(nnUNetTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.loss_type = "rce"
+
+class nnUNetTrainer_CE(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "ce"
 
 class nnUNetTrainer_Tversky(nnUNetTrainer):
     def __init__(self, *args, **kwargs):
