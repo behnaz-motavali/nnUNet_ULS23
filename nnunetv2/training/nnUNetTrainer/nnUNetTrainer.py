@@ -70,6 +70,9 @@ from nnunetv2.utilities.helpers import softmax_helper_dim1
 from nnunetv2.training.loss.rce import RCE_L1Loss
 from nnunetv2.training.loss.focal import FocalLoss
 from nnunetv2.training.loss.lovasz import LovaszSoftmaxLoss
+from nnunetv2.training.loss.tversky import TverskyLoss
+from nnunetv2.training.loss.loss_reverse_ce_kl import DiceReverseCELoss
+
 
 class nnUNetTrainer(object):
     def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
@@ -153,7 +156,7 @@ class nnUNetTrainer(object):
         self.probabilistic_oversampling = False
         self.num_iterations_per_epoch = 250
         self.num_val_iterations_per_epoch = 50
-        self.num_epochs = 1000 # changed from 1000
+        self.num_epochs = 10 # changed from 1000
         self.current_epoch = 0
         self.enable_deep_supervision = True
 
@@ -422,6 +425,12 @@ class nnUNetTrainer(object):
                 smooth=1e-5,
                 ddp=self.is_ddp
             )
+        elif loss_type == "tversky":
+            loss = TverskyLoss(
+                apply_nonlin=softmax_helper_dim1,
+                alpha=0.7,
+                beta=0.3
+            )     
         else:
             raise ValueError(f"Unknown loss_type: {loss_type}")
 
@@ -1421,3 +1430,13 @@ class nnUNetTrainer_RCE(nnUNetTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.loss_type = "rce"
+
+class nnUNetTrainer_Tversky(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "tversky"
+
+class nnUNetTrainer__ULS(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "uls"
