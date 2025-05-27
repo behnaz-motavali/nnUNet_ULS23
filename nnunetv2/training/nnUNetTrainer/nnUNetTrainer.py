@@ -70,7 +70,7 @@ from nnunetv2.utilities.helpers import softmax_helper_dim1
 from nnunetv2.training.loss.rce import RCE_L1Loss
 from nnunetv2.training.loss.focal import FocalLoss
 from nnunetv2.training.loss.lovasz import LovaszSoftmaxLoss
-from nnunetv2.training.loss.tversky import TverskyLoss
+from nnunetv2.training.loss.tversky import FocalTverskyLoss, LogCoshDiceLoss, TverskyLoss
 from nnunetv2.training.loss.loss_reverse_ce_kl import DiceReverseCELoss
 
 
@@ -435,6 +435,17 @@ class nnUNetTrainer(object):
                 alpha=0.7,
                 beta=0.3
             )     
+        elif loss_type == "focaltversky":
+            loss = FocalTverskyLoss(
+                apply_nonlin=softmax_helper_dim1,
+                alpha=0.7,
+                beta=0.3
+            )
+        elif loss_type == "logdice":
+            loss = LogCoshDiceLoss(
+                smooth=1e-5,
+                apply_nonlin=softmax_helper_dim1
+            )    
         else:
             raise ValueError(f"Unknown loss_type: {loss_type}")
 
@@ -1449,3 +1460,13 @@ class nnUNetTrainer__ULS(nnUNetTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.loss_type = "uls"
+
+class nnUNetTrainer_FoTversky(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "focaltversky"
+
+class nnUNetTrainer_LogDice(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "logdice"
