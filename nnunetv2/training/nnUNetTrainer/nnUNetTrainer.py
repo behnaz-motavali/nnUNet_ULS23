@@ -71,7 +71,7 @@ from nnunetv2.training.loss.rce import RCE_L1Loss
 from nnunetv2.training.loss.focal import FocalLoss
 from nnunetv2.training.loss.lovasz import LovaszSoftmaxLoss
 from nnunetv2.training.loss.tversky import FocalTverskyLoss, LogCoshDiceLoss, TverskyLoss
-from nnunetv2.training.loss.loss_reverse_ce_kl import DiceReverseCELoss
+from nnunetv2.training.loss.loss_reverse_ce_kl import DiceReverseCELoss, DiceReverseKLRCE
 
 
 class nnUNetTrainer(object):
@@ -445,7 +445,26 @@ class nnUNetTrainer(object):
             loss = LogCoshDiceLoss(
                 smooth=1e-5,
                 apply_nonlin=softmax_helper_dim1
-            )    
+            )  
+        elif loss_type == "reversedice":
+            loss = DiceReverseCELoss(
+                weight_dice=1.0,          # You can customize weights here
+                weight_rce=1.0,
+                dice_args={"apply_nonlin": softmax_helper_dim1}  # pass softmax if needed by your SoftDiceLoss
+            ) 
+        elif loss_type == "drklrce":
+            loss = DiceReverseKLRCE(
+                weight_dice=1.0,
+                weight_rce=1.0,
+                weight_rkl=1.0,
+                dice_args={
+                    "apply_nonlin": softmax_helper_dim1,
+                    "batch_dice": self.configuration_manager.batch_dice,
+                    "do_bg": True,
+                    "smooth": 1e-5,
+                    "ddp": self.is_ddp
+                }
+            ) 
         else:
             raise ValueError(f"Unknown loss_type: {loss_type}")
 
@@ -1470,3 +1489,13 @@ class nnUNetTrainer_LogDice(nnUNetTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.loss_type = "logdice"
+
+class nnUNetTrainer_RevDice(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "reversedice"
+
+class nnUNetTrainer_KLRC(nnUNetTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.loss_type = "drklrce"        
