@@ -66,7 +66,6 @@ from nnunetv2.utilities.get_network_from_plans import get_network_from_plans
 from nnunetv2.utilities.helpers import empty_cache, dummy_context
 from nnunetv2.utilities.label_handling.label_handling import convert_labelmap_to_one_hot, determine_num_input_channels
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
-from nnunetv2.training.loss.rce import RCE_L1Loss
 from nnunetv2.utilities.helpers import softmax_helper_dim1
 from nnunetv2.training.loss.rce import RCE_L1Loss
 from nnunetv2.training.loss.focal import FocalLoss
@@ -157,7 +156,7 @@ class nnUNetTrainer(object):
         self.probabilistic_oversampling = False
         self.num_iterations_per_epoch = 250
         self.num_val_iterations_per_epoch = 50
-        self.num_epochs = 10 # changed from 1000
+        self.num_epochs = 100 # changed from 1000
         self.current_epoch = 0
         self.enable_deep_supervision = True
 
@@ -409,7 +408,7 @@ class nnUNetTrainer(object):
                 lambda_reg=1.0,
                 ddp=self.is_ddp
             )
-        if loss_type == "ce":
+        elif loss_type == "crose":
             loss = CrossEntropyLossWrapper(
                 ignore_label=self.label_manager.ignore_label
             )  
@@ -1439,7 +1438,7 @@ class nnUNetTrainer_RCE(nnUNetTrainer):
 class nnUNetTrainer_CE(nnUNetTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.loss_type = "ce"
+        self.loss_type = "crose"
 
 class nnUNetTrainer_Tversky(nnUNetTrainer):
     def __init__(self, *args, **kwargs):
