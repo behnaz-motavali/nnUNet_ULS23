@@ -115,7 +115,7 @@ class nnUNetTrainer(object):
         # would also pickle the network etc. Bad, bad. Instead we just reinstantiate and then load the checkpoint we
         # need. So let's save the init args  
         self.my_init_kwargs = {}
-        for k in inspect.signature(self._init_).parameters.keys():
+        for k in inspect.signature(self.__init__).parameters.keys():
             if k in locals():
                 self.my_init_kwargs[k] = locals()[k]
         ###  Saving all the init args into class variables for later access
